@@ -120,6 +120,17 @@ const ItemList: React.FC = () => {
     }
   };
 
+  const getItemImage = (item: Item): string => {
+    const detail = item.item_detail_parsed || {};
+    return item.item_image || detail.item_image || detail.image_url || detail.pic_info?.picUrl || detail.pic_info?.url || '';
+  };
+
+  const formatPrice = (price?: string): string => {
+    const value = String(price || '').trim();
+    if (!value) return '-';
+    return value.startsWith('¥') || value.startsWith('￥') ? value : `¥${value}`;
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex justify-between items-center">
@@ -157,7 +168,9 @@ const ItemList: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {items.map(item => (
+          {items.map(item => {
+              const itemImage = getItemImage(item);
+              return (
               <div key={`${item.cookie_id}-${item.item_id}`} className="ios-card p-4 rounded-3xl hover:shadow-lg transition-all group relative">
                   <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                       <button
@@ -176,15 +189,15 @@ const ItemList: React.FC = () => {
                       </button>
                   </div>
                   <div className="aspect-square bg-gray-100 rounded-2xl mb-4 overflow-hidden relative">
-                      {item.item_image ? (
-                          <img src={item.item_image} alt="" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      {itemImage ? (
+                          <img src={itemImage} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                       ) : (
                           <div className="w-full h-full flex items-center justify-center text-gray-300">
                               <Box className="w-10 h-10" />
                           </div>
                       )}
                       <div className="absolute top-2 left-2 bg-black/50 backdrop-blur-md text-white text-xs font-bold px-2 py-1 rounded-lg">
-                          ¥{item.item_price}
+                          {formatPrice(item.item_price)}
                       </div>
                   </div>
                   <h3 className="font-bold text-gray-900 line-clamp-2 text-sm mb-2 h-10">{item.item_title}</h3>
@@ -214,7 +227,8 @@ const ItemList: React.FC = () => {
                       </button>
                   </div>
               </div>
-          ))}
+              );
+          })}
           {items.length === 0 && (
              <div className="col-span-full py-20 text-center text-gray-400">
                  <ShoppingBag className="w-12 h-12 mx-auto mb-4 opacity-30" />

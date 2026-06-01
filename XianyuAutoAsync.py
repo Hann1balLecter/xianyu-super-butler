@@ -2793,6 +2793,9 @@ class XianyuLive:
                 if not item_id or item_id.startswith('auto_'):
                     continue
 
+                pic_info = item.get('pic_info', {}) or {}
+                item_image = pic_info.get('picUrl', '') or pic_info.get('url', '') or item.get('item_image', '')
+
                 # 构造商品详情数据
                 item_detail = {
                     'title': item.get('title', ''),
@@ -2821,6 +2824,7 @@ class XianyuLive:
                     'item_description': '',  # 暂时为空
                     'item_category': str(item.get('category_id', '')),
                     'item_price': item.get('price_text', ''),
+                    'item_image': item_image,
                     'item_detail': json.dumps(item_detail, ensure_ascii=False)
                 })
 

@@ -229,6 +229,10 @@ class DBManager:
                 order_status TEXT DEFAULT 'unknown',
                 cookie_id TEXT,
                 is_bargain INTEGER DEFAULT 0,
+                receiver_name TEXT DEFAULT '',
+                receiver_phone TEXT DEFAULT '',
+                receiver_address TEXT DEFAULT '',
+                receiver_city TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (cookie_id) REFERENCES cookies(id) ON DELETE CASCADE
@@ -245,15 +249,13 @@ class DBManager:
                 logger.info("orders 表 is_bargain 列添加完成")
 
             # 检查并添加收货人信息列
-            try:
-                self._execute_sql(cursor, "SELECT receiver_name FROM orders LIMIT 1")
-            except sqlite3.OperationalError:
-                # receiver_name 列不存在，需要添加
-                logger.info("正在为 orders 表添加收货人信息列...")
-                self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_name TEXT DEFAULT ''")
-                self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_phone TEXT DEFAULT ''")
-                self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_address TEXT DEFAULT ''")
-                logger.info("orders 表收货人信息列添加完成")
+            for column_name in ('receiver_name', 'receiver_phone', 'receiver_address', 'receiver_city'):
+                try:
+                    self._execute_sql(cursor, f"SELECT {column_name} FROM orders LIMIT 1")
+                except sqlite3.OperationalError:
+                    logger.info(f"正在为 orders 表添加 {column_name} 列...")
+                    self._execute_sql(cursor, f"ALTER TABLE orders ADD COLUMN {column_name} TEXT DEFAULT ''")
+                    logger.info(f"orders 表 {column_name} 列添加完成")
 
             # 检查并添加 version 列（用于乐观锁）
             try:
@@ -310,6 +312,7 @@ class DBManager:
                 item_description TEXT,
                 item_category TEXT,
                 item_price TEXT,
+                item_image TEXT DEFAULT '',
                 item_detail TEXT,
                 is_multi_spec BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -318,6 +321,14 @@ class DBManager:
                 UNIQUE(cookie_id, item_id)
             )
             ''')
+
+            # 检查并添加 item_image 列（用于商品主图展示）
+            try:
+                self._execute_sql(cursor, "SELECT item_image FROM item_info LIMIT 1")
+            except sqlite3.OperationalError:
+                logger.info("正在为 item_info 表添加 item_image 列...")
+                self._execute_sql(cursor, "ALTER TABLE item_info ADD COLUMN item_image TEXT DEFAULT ''")
+                logger.info("item_info 表 item_image 列添加完成")
 
             # 检查并添加 multi_quantity_delivery 列（用于多数量发货功能）
             try:
@@ -772,6 +783,13 @@ class DBManager:
                     self._execute_sql(cursor, "ALTER TABLE item_info ADD COLUMN is_multi_spec BOOLEAN DEFAULT FALSE")
                     logger.info("为item_info表添加多规格字段")
 
+                # 为item_info表添加商品主图字段（如果不存在）
+                try:
+                    self._execute_sql(cursor, "SELECT item_image FROM item_info LIMIT 1")
+                except sqlite3.OperationalError:
+                    self._execute_sql(cursor, "ALTER TABLE item_info ADD COLUMN item_image TEXT DEFAULT ''")
+                    logger.info("为item_info表添加item_image字段")
+
                 # 为item_info表添加多数量发货字段（如果不存在）
                 try:
                     self._execute_sql(cursor, "SELECT multi_quantity_delivery FROM item_info LIMIT 1")
@@ -788,29 +806,13 @@ class DBManager:
                     self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN is_bargain INTEGER DEFAULT 0")
                     logger.info("为orders表添加is_bargain字段")
 
-                # 检查orders表是否有receiver_name字段
-                try:
-                    self._execute_sql(cursor, "SELECT receiver_name FROM orders LIMIT 1")
-                except sqlite3.OperationalError:
-                    # receiver_name字段不存在，需要添加
-                    self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_name TEXT")
-                    logger.info("为orders表添加receiver_name字段")
-
-                # 检查orders表是否有receiver_phone字段
-                try:
-                    self._execute_sql(cursor, "SELECT receiver_phone FROM orders LIMIT 1")
-                except sqlite3.OperationalError:
-                    # receiver_phone字段不存在，需要添加
-                    self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_phone TEXT")
-                    logger.info("为orders表添加receiver_phone字段")
-
-                # 检查orders表是否有receiver_address字段
-                try:
-                    self._execute_sql(cursor, "SELECT receiver_address FROM orders LIMIT 1")
-                except sqlite3.OperationalError:
-                    # receiver_address字段不存在，需要添加
-                    self._execute_sql(cursor, "ALTER TABLE orders ADD COLUMN receiver_address TEXT")
-                    logger.info("为orders表添加receiver_address字段")
+                # 检查orders表是否有收货人信息字段
+                for column_name in ('receiver_name', 'receiver_phone', 'receiver_address', 'receiver_city'):
+                    try:
+                        self._execute_sql(cursor, f"SELECT {column_name} FROM orders LIMIT 1")
+                    except sqlite3.OperationalError:
+                        self._execute_sql(cursor, f"ALTER TABLE orders ADD COLUMN {column_name} TEXT DEFAULT ''")
+                        logger.info(f"为orders表添加{column_name}字段")
 
                 # 检查orders表是否有system_shipped字段（系统是否已发货）
                 try:
@@ -3748,7 +3750,8 @@ class DBManager:
 
     def save_item_basic_info(self, cookie_id: str, item_id: str, item_title: str = None,
                             item_description: str = None, item_category: str = None,
-                            item_price: str = None, item_detail: str = None) -> bool:
+                            item_price: str = None, item_image: str = None,
+                            item_detail: str = None) -> bool:
         """保存或更新商品基本信息，使用原子操作避免并发问题
 
         Args:
@@ -3758,6 +3761,7 @@ class DBManager:
             item_description: 商品描述
             item_category: 商品分类
             item_price: 商品价格
+            item_image: 商品主图
             item_detail: 商品详情JSON
 
         Returns:
@@ -3771,10 +3775,10 @@ class DBManager:
                 # 首先尝试插入，如果已存在则忽略
                 cursor.execute('''
                 INSERT OR IGNORE INTO item_info (cookie_id, item_id, item_title, item_description,
-                                               item_category, item_price, item_detail, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                               item_category, item_price, item_image, item_detail, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ''', (cookie_id, item_id, item_title or '', item_description or '',
-                      item_category or '', item_price or '', item_detail or ''))
+                      item_category or '', item_price or '', item_image or '', item_detail or ''))
 
                 # 如果是新插入的记录，直接返回成功
                 if cursor.rowcount > 0:
@@ -3802,6 +3806,10 @@ class DBManager:
                 if item_price:
                     update_parts.append("item_price = CASE WHEN (item_price IS NULL OR item_price = '') THEN ? ELSE item_price END")
                     params.append(item_price)
+
+                if item_image:
+                    update_parts.append("item_image = CASE WHEN (item_image IS NULL OR item_image = '') THEN ? ELSE item_image END")
+                    params.append(item_image)
 
                 # 对于item_detail，只有在现有值为空时才更新
                 if item_detail:
@@ -3883,13 +3891,14 @@ class DBManager:
                             cursor.execute('''
                             UPDATE item_info SET
                                 item_title = ?, item_description = ?, item_category = ?,
-                                item_price = ?, item_detail = ?, updated_at = CURRENT_TIMESTAMP
+                                item_price = ?, item_image = ?, item_detail = ?, updated_at = CURRENT_TIMESTAMP
                             WHERE cookie_id = ? AND item_id = ?
                             ''', (
                                 item_data.get('title', ''),
                                 item_data.get('description', ''),
                                 item_data.get('category', ''),
                                 item_data.get('price', ''),
+                                item_data.get('item_image', '') or item_data.get('image_url', ''),
                                 json.dumps(item_data, ensure_ascii=False),
                                 cookie_id, item_id
                             ))
@@ -3910,14 +3919,15 @@ class DBManager:
                         # 处理字典类型的详情数据（向后兼容）
                         cursor.execute('''
                         INSERT INTO item_info (cookie_id, item_id, item_title, item_description,
-                                             item_category, item_price, item_detail)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                                             item_category, item_price, item_image, item_detail)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             cookie_id, item_id,
                             item_data.get('title', '') if item_data else '',
                             item_data.get('description', '') if item_data else '',
                             item_data.get('category', '') if item_data else '',
                             item_data.get('price', '') if item_data else '',
+                            (item_data.get('item_image', '') or item_data.get('image_url', '')) if item_data else '',
                             json.dumps(item_data, ensure_ascii=False) if item_data else ''
                         ))
                     logger.info(f"新增商品信息: {item_id}")
@@ -4230,6 +4240,7 @@ class DBManager:
                         item_description = item_data.get('item_description', '')
                         item_category = item_data.get('item_category', '')
                         item_price = item_data.get('item_price', '')
+                        item_image = item_data.get('item_image', '')
                         item_detail = item_data.get('item_detail', '')
 
                         if not cookie_id or not item_id:
@@ -4243,10 +4254,10 @@ class DBManager:
                         # 使用 INSERT OR IGNORE + UPDATE 模式
                         cursor.execute('''
                         INSERT OR IGNORE INTO item_info (cookie_id, item_id, item_title, item_description,
-                                                       item_category, item_price, item_detail, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                                       item_category, item_price, item_image, item_detail, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                         ''', (cookie_id, item_id, item_title, item_description,
-                              item_category, item_price, item_detail))
+                              item_category, item_price, item_image, item_detail))
 
                         if cursor.rowcount == 0:
                             # 记录已存在，进行条件更新
@@ -4256,6 +4267,7 @@ class DBManager:
                                 item_description = CASE WHEN (item_description IS NULL OR item_description = '') AND ? != '' THEN ? ELSE item_description END,
                                 item_category = CASE WHEN (item_category IS NULL OR item_category = '') AND ? != '' THEN ? ELSE item_category END,
                                 item_price = CASE WHEN (item_price IS NULL OR item_price = '') AND ? != '' THEN ? ELSE item_price END,
+                                item_image = CASE WHEN (item_image IS NULL OR item_image = '') AND ? != '' THEN ? ELSE item_image END,
                                 item_detail = CASE WHEN (item_detail IS NULL OR item_detail = '' OR TRIM(item_detail) = '') AND ? != '' THEN ? ELSE item_detail END,
                                 updated_at = CURRENT_TIMESTAMP
                             WHERE cookie_id = ? AND item_id = ?
@@ -4265,6 +4277,7 @@ class DBManager:
                                 item_description, item_description,
                                 item_category, item_category,
                                 item_price, item_price,
+                                item_image, item_image,
                                 item_detail, item_detail,
                                 cookie_id, item_id
                             ))
@@ -4573,7 +4586,7 @@ class DBManager:
                               amount: str = None, order_status: str = None, cookie_id: str = None,
                               is_bargain: bool = None, created_at: str = None, receiver_name: str = None,
                               receiver_phone: str = None, receiver_address: str = None,
-                              system_shipped: bool = None, expected_version: int = None,
+                              receiver_city: str = None, system_shipped: bool = None, expected_version: int = None,
                               chat_id: str = None):
         """插入或更新订单信息"""
         with self.lock:
@@ -4637,6 +4650,9 @@ class DBManager:
                     if receiver_address is not None:
                         update_fields.append("receiver_address = ?")
                         update_values.append(receiver_address)
+                    if receiver_city is not None:
+                        update_fields.append("receiver_city = ?")
+                        update_values.append(receiver_city)
                     if system_shipped is not None:
                         update_fields.append("system_shipped = ?")
                         update_values.append(1 if system_shipped else 0)
@@ -4675,24 +4691,24 @@ class DBManager:
                         cursor.execute('''
                         INSERT INTO orders (order_id, item_id, buyer_id, spec_name, spec_value,
                                           quantity, amount, order_status, cookie_id, is_bargain, created_at,
-                                          receiver_name, receiver_phone, receiver_address, system_shipped, chat_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                          receiver_name, receiver_phone, receiver_address, receiver_city, system_shipped, chat_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (order_id, item_id, buyer_id, spec_name, spec_value,
                               quantity, amount, order_status or 'unknown', cookie_id,
                               1 if is_bargain else 0, created_at,
-                              receiver_name, receiver_phone, receiver_address,
+                              receiver_name, receiver_phone, receiver_address, receiver_city,
                               1 if system_shipped else 0, chat_id or ''))
                     else:
                         # 使用默认的创建时间（CURRENT_TIMESTAMP，UTC时间）
                         cursor.execute('''
                         INSERT INTO orders (order_id, item_id, buyer_id, spec_name, spec_value,
                                           quantity, amount, order_status, cookie_id, is_bargain,
-                                          receiver_name, receiver_phone, receiver_address, system_shipped, chat_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                          receiver_name, receiver_phone, receiver_address, receiver_city, system_shipped, chat_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (order_id, item_id, buyer_id, spec_name, spec_value,
                               quantity, amount, order_status or 'unknown', cookie_id,
                               1 if is_bargain else 0,
-                              receiver_name, receiver_phone, receiver_address,
+                              receiver_name, receiver_phone, receiver_address, receiver_city,
                               1 if system_shipped else 0, chat_id or ''))
                     logger.info(f"插入新订单: {order_id}")
 

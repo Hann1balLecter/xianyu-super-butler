@@ -116,9 +116,20 @@ export interface Item {
   item_id: string;
   item_title?: string;
   item_price?: string;
-  item_image?: string; // Inferred from common usage, though not explicitly in list model sometimes
+  item_image?: string;
   item_category?: string;
+  item_detail?: string;
+  item_detail_parsed?: {
+    item_image?: string;
+    image_url?: string;
+    pic_info?: {
+      picUrl?: string;
+      url?: string;
+    };
+  };
   is_multi_spec?: number | boolean;
+  is_multi_qty_ship?: number | boolean;
+  multi_quantity_delivery?: number | boolean;
   created_at?: string;
 }
 
